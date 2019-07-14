@@ -1,0 +1,15 @@
+# IDE 工程文件/文件夹
+.vs/
+*.sln
+
+# 编译产生的文件/文件夹
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+*.bin
+*.elf
+*.o
