@@ -82,7 +82,8 @@ void loop()
     sensors.requestTemperatures();
     tem = sensors.getTempCByIndex(0);
 
-    if (thermalOn)
+    // Note：此处为简单的温度控制算法，用户可自行更换更高级、更合理的算法
+    if (thermalOn) // 如果温控打开
     {
         if (cTemperMain < dTemperMain-2) {digitalWrite(EN1, HIGH);}
         else if (cTemperMain > dTemperMain+2) {digitalWrite(EN1, LOW);}
@@ -96,7 +97,7 @@ void loop()
         if (cTemperThermal < dTemperThermal-2) {digitalWrite(EN4, HIGH);}
         else if (cTemperThermal > dTemperThermal+2) {digitalWrite(EN4, LOW);}
     }
-    else
+    else        // 如果温控关闭
     {
         digitalWrite(EN1, LOW);
         digitalWrite(EN2, LOW);
@@ -110,52 +111,50 @@ void loop()
 // I2C 数据请求回调函数
 void requestEvent(int count)
 {
-    Wire.write(0);
-    uint8_t *pt = (uint8_t *)&tem;
-    for (uint8_t i = 0; i < 4; i++)
-    {
-        Wire.write(*pt++);
-    }
+    int16_t temp = tem * 10; // ×10 保留 1 位小数
+    Wire.write(temp >> 8);
+    Wire.write(temp & 0xFF);
 }
 
 // I2C 数据接收回调函数
+/**
+ * recvBuffer[0]:
+ *      0x00 关闭热控
+ *      0x01 打开热控
+ *      0x02 测量温度
+ *      0x03 设置温度
+ **/
 void receiveEvent(int count)
 {
     uint8_t i = 0;
-    uint8_t *pt;
     // 读取 I2C 数据到缓冲区
     while (Wire.available())
     {
         recvBuffer[i++] = (uint8_t)Wire.read();
     }
 
-    if (recvBuffer == 0x00)
+    if (recvBuffer[0] == 0x00)      // 关闭温控
     {
         thermalOn = false;
     }
-    else
+    else if (recvBuffer[0] == 0x01) // 打开温控
     {
         thermalOn = true;
     }
-    // 拷贝数据到温度值变量
-    pt = (uint8_t *)&cTemperMain;
-    for (i = 1; i < 5; i++)
+    else if (recvBuffer[0] == 0x02) // 测量温度
     {
-        *pt++ = recvBuffer[i];
+        // 拷贝数据到当前温度值变量
+        cTemperMain = ((int16_t)((recvBuffer[1] << 8) + recvBuffer[2])) * 0.1;
+        cTemperAttitude = ((int16_t)((recvBuffer[3] << 8) + recvBuffer[4])) * 0.1;
+        cTemperPower = ((int16_t)((recvBuffer[5] << 8) + recvBuffer[6])) * 0.1;
+        cTemperThermal = ((int16_t)((recvBuffer[7] << 8) + recvBuffer[8])) * 0.1;
     }
-    pt = (uint8_t *)&cTemperAttitude;
-    for (i = 5; i < 9; i++)
+    else if (recvBuffer[0] == 0x03) // 设置温度
     {
-        *pt++ = recvBuffer[i];
-    }
-    pt = (uint8_t *)&cTemperPower;
-    for (i = 9; i < 13; i++)
-    {
-        *pt++ = recvBuffer[i];
-    }
-    pt = (uint8_t *)&cTemperThermal;
-    for (i = 13; i < 17; i++)
-    {
-        *pt++ = recvBuffer[i];
+        // 拷贝数据到设置温度值变量
+        dTemperMain = ((int16_t)((recvBuffer[1] << 8) + recvBuffer[2])) * 0.1;
+        dTemperAttitude = ((int16_t)((recvBuffer[3] << 8) + recvBuffer[4])) * 0.1;
+        dTemperPower = ((int16_t)((recvBuffer[5] << 8) + recvBuffer[6])) * 0.1;
+        dTemperThermal = ((int16_t)((recvBuffer[7] << 8) + recvBuffer[8])) * 0.1;
     }
 }
