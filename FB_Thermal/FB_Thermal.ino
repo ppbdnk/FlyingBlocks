@@ -1,9 +1,9 @@
 /*******************************************************************************
-* @file     --> FB_Thermak.ino
+* @file     --> FB_Thermal.ino
 * @author   --> Lichangchun
 * @version  --> v2.1
 * @date     --> 2019-07-14
-* @update   --> 2019-07-14
+* @update   --> 2019-07-18
 * @brief    --> 热控模块
 *           1. 读取热控板温度数据并发送给主控板
 *           2. 从主控板接收所有板的温度数据和温度控制指令
@@ -16,6 +16,7 @@
 
 /* Private define ------------------------------------------------------------*/
 #define ONE_WIRE_BUS 42
+#define I2C_WIRE_BUS 0x12
 
 /* Private variables ---------------------------------------------------------*/
 // 引脚定义
@@ -30,7 +31,7 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
 // 温控开关
-volatile bool thermalOn = true;
+volatile bool thermalOn = false;
 
 // 温度设定值
 volatile float dTemperMain = 38.0;    // 主控设定温度
@@ -49,6 +50,7 @@ volatile float tem = 0; // 热控板测量温度临时存储
 uint8_t recvBuffer[20] = {0};   // 数据接收缓冲区
 
 uint8_t ledFlag = 0; // LED 状态标志
+uint64_t previousMillis = 0; // 毫秒时间记录
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -59,28 +61,38 @@ void setup()
     pinMode(EN2, OUTPUT);
     pinMode(EN3, OUTPUT);
     pinMode(EN4, OUTPUT);
-
-    Wire.begin(0x12);
+    // I2C 总线初始化
+    Wire.begin(I2C_WIRE_BUS);
     Wire.onRequest(requestEvent);
     Wire.onReceive(receiveEvent);
+    // 温度传感器初始化
     sensors.begin();
+    sensors.setWaitForConversion(false); // 设置为非阻塞模式
+    sensors.requestTemperatures();
 }
 
 void loop()
 {
-    if (ledFlag == 0)
+    uint64_t currentMillis = millis();
+    // 每 500ms 翻转 LED，并获取一次温度
+    if (currentMillis - previousMillis >= 500)
     {
-        ledpin = 1;
-        digitalWrite(ledpin, LOW);
-    }
-    else
-    {
-        ledpin = 0;
-        digitalWrite(ledpin, HIGH);
-    }
+        previousMillis = currentMillis; // 更新时间记录
+        tem = sensors.getTempCByIndex(0);
 
-    sensors.requestTemperatures();
-    tem = sensors.getTempCByIndex(0);
+        if (ledFlag == 0)
+        {
+            ledFlag = 1;
+            digitalWrite(ledpin, LOW);
+        }
+        else 
+        {
+            ledFlag = 0;
+            digitalWrite(ledpin, HIGH);
+        }
+        
+        sensors.requestTemperatures(); // 发起新的温度转换
+    }
 
     // Note：此处为简单的温度控制算法，用户可自行更换更高级、更合理的算法
     if (thermalOn) // 如果温控打开
@@ -89,7 +101,7 @@ void loop()
         else if (cTemperMain > dTemperMain+2) {digitalWrite(EN1, LOW);}
 
         if (cTemperAttitude < dTemperAttitude-2) {digitalWrite(EN3, HIGH);}
-        else if (cTemperAttitude > dTemperMainAttitude+2) {digitalWrite(EN3, LOW);}
+        else if (cTemperAttitude > dTemperAttitude+2) {digitalWrite(EN3, LOW);}
 
         if (cTemperPower < dTemperPower-2) {digitalWrite(EN2, HIGH);}
         else if (cTemperPower > dTemperPower+2) {digitalWrite(EN2, LOW);}
@@ -105,11 +117,11 @@ void loop()
         digitalWrite(EN4, LOW);
     }
 
-    delay(50);
+    delay(20);
 }
 
 // I2C 数据请求回调函数
-void requestEvent(int count)
+void requestEvent()
 {
     int16_t temp = tem * 10; // ×10 保留 1 位小数
     Wire.write(temp >> 8);
@@ -133,15 +145,19 @@ void receiveEvent(int count)
         recvBuffer[i++] = (uint8_t)Wire.read();
     }
 
-    if (recvBuffer[0] == 0x00)      // 关闭温控
+    if (recvBuffer[0] == 0x00) // 温控开关
     {
-        thermalOn = false;
+        if (recvBuffer[1] == 0x00)   // 温控开关
+        {
+            thermalOn = false;
+        }
+        else // (recvBuffer[1] == 0x01) 打开温控
+        {
+            thermalOn = true;
+        }
     }
-    else if (recvBuffer[0] == 0x01) // 打开温控
-    {
-        thermalOn = true;
-    }
-    else if (recvBuffer[0] == 0x02) // 测量温度
+
+    else if (recvBuffer[0] == 0x01) // 测量温度
     {
         // 拷贝数据到当前温度值变量
         cTemperMain = ((int16_t)((recvBuffer[1] << 8) + recvBuffer[2])) * 0.1;
@@ -149,7 +165,7 @@ void receiveEvent(int count)
         cTemperPower = ((int16_t)((recvBuffer[5] << 8) + recvBuffer[6])) * 0.1;
         cTemperThermal = ((int16_t)((recvBuffer[7] << 8) + recvBuffer[8])) * 0.1;
     }
-    else if (recvBuffer[0] == 0x03) // 设置温度
+    else if (recvBuffer[0] == 0x02) // 设置温度
     {
         // 拷贝数据到设置温度值变量
         dTemperMain = ((int16_t)((recvBuffer[1] << 8) + recvBuffer[2])) * 0.1;

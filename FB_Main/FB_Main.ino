@@ -26,6 +26,9 @@
 #define I2C_ADDR_POWER      0x40 // 电源
 
 /* Private variables ---------------------------------------------------------*/
+// 引脚定义
+const int ledpin = 29; // LED
+
 // 串口数据缓冲区
 uint8_t sendBuffer[30];
 uint8_t recvBuffer[8];
@@ -40,11 +43,16 @@ volatile bool wheelControlOn = false;
 volatile bool magnetbarControlOn = false;
 
 // 飞轮转速记录
-volatile int8_t wheelSpeed = 0;
+volatile int16_t cWheelSpeed = 0; // 转速测量值，使用 2 个字节
+volatile int8_t dWheelSpeed = 0; // 转速设置值，正负分别 100 档
 
 // 磁矩值记录
-volatile int8_t magneticMomentX = 0; 
-volatile int6_t magneticMomentY = 0;
+// 测量值
+volatile int8_t cMagneticMomentX = 0; // 符号表正负
+volatile int8_t cMagneticMomentY = 0;
+//设置值，todo.
+volatile int8_t dMagneticMomentX = 0;
+volatile int8_t dMagneticMomentY = 0;
 
 // 电池电量记录
 volatile int8_t powerLevel = 9;     
@@ -95,7 +103,7 @@ void RecvThread::loop()
     if (t>0 && recvBuffer[0]==0xAA && recvBuffer[1]==0x55 &&\
         recvBuffer[4]==0x01 && recvBuffer[5]==0x01)
     {
-        ////// 电源控制 ////// 
+        ////// 电源控制开关 ////// 
         if (recvBuffer[2] == 0x00)
         {
             if (recvBuffer[3] == 0x00)
@@ -110,14 +118,14 @@ void RecvThread::loop()
             }
         }
 
-        ////// 飞轮控制 ////// 
+        ////// 飞轮控制开关 ////// 
         if (recvBuffer[2] == 0x01)
         {
             if (recvBuffer[3] == 0x00)
             {
                 wheelControlOn = false;
                 // 与姿控板通信，关闭飞轮
-                Wire.beginTransmisson(I2C_ADDR_ATTITUDE);
+                Wire.beginTransmission(I2C_ADDR_ATTITUDE);
                 Wire.write(0x06);
                 Wire.write(0x00);
                 Wire.endTransmission();
@@ -127,7 +135,7 @@ void RecvThread::loop()
             {
                 wheelControlOn = true;
                 // 与姿控板通信，打开飞轮
-                Wire.beginTransmisson(I2C_ADDR_ATTITUDE);
+                Wire.beginTransmission(I2C_ADDR_ATTITUDE);
                 Wire.write(0x06);
                 Wire.write(0x01);
                 Wire.endTransmission();
@@ -135,15 +143,16 @@ void RecvThread::loop()
             }
         }
 
-        ////// 温度控制 ////// 
+        ////// 温度控制开关 ////// 
         if (recvBuffer[2] == 0x02)
         {
-            if (recvBuffer[3] == 0x00) /* 热控关闭 */
+            if (recvBuffer[3] == 0x00) // 热控关闭
             {
                 thermalControlOn = false;
                 uint8_t *pt;
                 // 与热控板通信，关闭热控
                 Wire.beginTransmission(I2C_ADDR_THERMAL);
+                Wire.write(0x00);
                 Wire.write(0x00);
                 Wire.endTransmission();
                 // sleep(20);
@@ -154,13 +163,14 @@ void RecvThread::loop()
                 uint8_t *pt;
                 // 与热控板通信，关闭热控
                 Wire.beginTransmission(I2C_ADDR_THERMAL);
+                Wire.write(0x00);
                 Wire.write(0x01);
                 Wire.endTransmission();
                 // sleep(20);
             }
         }
 
-        ////// 磁力矩器控制 ////// 
+        ////// 磁力矩器控制开关 ////// 
         if (recvBuffer[2] == 0x03)
         {
             if (recvBuffer[3] == 0x00)
@@ -178,11 +188,11 @@ void RecvThread::loop()
         ////// 飞轮转速设置 ////// 
         if (recvBuffer[2] == 0x04)
         {
-            wheelSpeed = (int8_t)(recvBuffer[3]);
+            dWheelSpeed = (int8_t)(recvBuffer[3]);
             //与姿控板通信，发送飞轮转速
             Wire.beginTransmission(I2C_ADDR_ATTITUDE);
             Wire.write(0x04);
-            Wire.write(wheelSpeed);
+            Wire.write(dWheelSpeed);
             Wire.endTransmission();
             // sleep(20);
         }
@@ -193,7 +203,7 @@ void RecvThread::loop()
             // todo.
         }
 
-        ////// 关闭所有模块 ////// 
+        ////// 关闭所有模块控制 ////// 
         if (recvBuffer[2] == 0x06)
         {
             // 关闭电源板
@@ -203,6 +213,7 @@ void RecvThread::loop()
             thermalControlOn = false;
             uint8_t *pt;
             Wire.beginTransmission(I2C_ADDR_THERMAL);
+            Wire.write(0x00);
             Wire.write(0x00);
             Wire.endTransmission();
 
@@ -241,10 +252,10 @@ void loop()
     sensors.requestTemperatures();
     cTemperMain = sensors.getTempCByIndex(0) * 10; // ×10 为保留 1 位小数
 
-    // 姿控板：温度(2) + 三轴角度(6) + 三轴角速度(6) + 三轴加速度(6)
+    // 姿控板：温度(2) + 三轴角度(6) + 三轴角速度(6) + 三轴加速度(6) + 飞轮转速(2)
     i = 0;
-    // 将 I2C 数据读到接收缓冲区，共 20 字节
-    Wire.requestFrom(I2C_ADDR_ATTITUDE, 20);
+    // 将 I2C 数据读到接收缓冲区，共 22 字节
+    Wire.requestFrom(I2C_ADDR_ATTITUDE, 22);
     while (Wire.available())
     {
         iicBuffer[i++] = (uint8_t)Wire.read();
@@ -266,6 +277,10 @@ void loop()
     {
         accelerations[i] = iicBuffer[i+14];
     }
+    // 更新飞轮转速测量值
+    pt = (uint8_t *)&cWheelSpeed;
+    pt[0] = iicBuffer[20];
+    pt[1] = iicBuffer[21];
 
     // 电源板：温度(2) + 电量(1)
     i = 0;
@@ -339,7 +354,7 @@ void loop()
     if (thermalControlOn)
     {
         Wire.write(I2C_ADDR_THERMAL);
-        Wire.write(0x02);
+        Wire.write(0x01);
         Wire.write(cTemperMain >> 8);
         Wire.write(cTemperMain & 0xFF);
         Wire.write(cTemperAttitude >> 8);
@@ -376,14 +391,15 @@ void loop()
     sendBuffer[0] = 0xAA;
     sendBuffer[1] = 0x55;
     sendBuffer[2] = 0x06; // 飞轮数据
-    sendBuffer[3] = wheelSpeed;
+    sendBuffer[3] = cWheelSpeed >> 8;
+    sendBuffer[4] = cWheelSpeed & 0xFF;
     if (wheelControlOn)
-        sendBuffer[4] = 0x01;
+        sendBuffer[5] = 0x01;
     else
-        sendBuffer[4] = 0x00;
-    sendBuffer[5] = 0x0A;
-    sendBuffer[6] = 0x0D;
-    for (i = 0; i < 7; i++)
+        sendBuffer[5] = 0x00;
+    sendBuffer[6] = 0x0A;
+    sendBuffer[7] = 0x0D;
+    for (i = 0; i < 8; i++)
     {
         Serial1.write(sendBuffer[i]);
     }
@@ -394,8 +410,8 @@ void loop()
     sendBuffer[0] = 0xAA;
     sendBuffer[1] = 0x55;
     sendBuffer[2] = 0x08; // 磁控数据
-    sendBuffer[3] = magneticMomentX;
-    sendBuffer[4] = magneticMomentY;
+    sendBuffer[3] = cMagneticMomentX;
+    sendBuffer[4] = cMagneticMomentY;
     if (magnetbarControlOn)
         sendBuffer[5] = 0x01;
     else
