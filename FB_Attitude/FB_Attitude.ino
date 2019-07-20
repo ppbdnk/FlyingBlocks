@@ -3,7 +3,7 @@
 * @author   --> Lichangchun
 * @version  --> v2.1
 * @date     --> 2019-07-18
-* @update   --> 2019-07-18
+* @update   --> 2019-07-20
 * @brief    --> 姿控模块
 *           1. 读取 IMU 数据
 *           2. 控制电机正/反转，利用 PWM 控制电机转速
@@ -18,6 +18,7 @@
 #include <ITG3200.h>    // 三轴陀螺仪
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <string.h>     // 使用内存拷贝函数
 
 /* Private macro -------------------------------------------------------------*/
 // #define DEBUG
@@ -35,25 +36,28 @@ const int ENA = 5;      // 电机使能引脚
 // IMU 数据记录
 double roll, pitch, yaw; 
 
-uint8_t angles[6] = {0};
-uint8_t angularVelocities[6] = {0};
-uint8_t accelerations[6] = {0};
+float magCount[3] = {0};    // 电子罗盘
+float quaternion[4] = {0};  // 四元数
+float angularVelocities[3] = {0};
+float accelerations[3] = {0};
 
 // 飞轮控制开关
 volatile bool wheelOn = false;
 // 飞轮转速设置值
 volatile int8_t dWheelSpeed = 0; // 有符号(-100 ~ 100)，可设置正负 100 档
 // 飞轮转速测量值
-volatile int16_t cWheelSpeed = 0; // 2 字节，以使测量值范围精确一些
+volatile int16_t cWheelSpeed = 0; // 16 位整型，以使测量值范围精确一些
 
 // 磁力矩器控制开关
 volatile bool magnetbarsOn = false;
 // 磁力矩大小设置
 volatile int8_t dMagnetbarX = 0; // 磁矩 X 设置值
 volatile int8_t dMagnetbarY = 0; // 磁矩 Y 设置值
+volatile int8_t dMagnetbarZ = 0; // 磁矩 Z 设置值
 // 磁力矩测量值
-volatile int8_t cMagnetbarX = 0; // 磁矩 X 测量值
-volatile int8_t cMagnetbarY = 0; // 磁矩 Y 测量值
+volatile int16_t cMagnetbarX = 0; // 磁矩 X 电流
+volatile int16_t cMagnetbarY = 0; // 磁矩 Y 电流
+volatile int16_t cMagnetbarZ = 0; // 磁矩Z 电流
 
 // 实例化温度传感器
 OneWire oneWire(ONE_WIRE_BUS);
@@ -75,18 +79,15 @@ uint8_t recvBuffer[20] = {0};   // 数据接收缓冲区
 void requestEvent()
 {
     // 温度
-    int16_t tem = temperature * 10; // ×10 保留 1 位小数
-    Wire.write(tem >> 8);
-    Wire.write(tem & 0xFF);
-    // 三轴角度
-    Wire.write(angles, sizeof angles);
+    Wire.write((uint8_t *)&temperature, 4);
+    // 四元数
+    Wire.write((uint8_t *)quaternion, 16);
     // 三轴角速度
-    Wire.write(angularVelocities, sizeof angularVelocities);
+    Wire.write((uint8_t *)angularVelocities, 12);
     // 三轴加速度
-    Wire.write(accelerations, sizeof accelerations);
+    Wire.write((uint8_t *)accelerations, 12);
     // 飞轮转速
-    Wire.write(cWheelSpeed >> 8);
-    Wire.write(cWheelSpeed & 0xFF);
+    Wire.write((uint8_t *)&cWheelSpeed, 2);
 }
 
 /*******************************************************************************
@@ -172,5 +173,5 @@ void loop()
         }
         sensors.requestTemperatures(); // 发起新的温度转换
     }
-    delay(20);
+    delay(50);
 }

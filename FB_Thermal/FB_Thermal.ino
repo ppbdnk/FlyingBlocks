@@ -3,7 +3,7 @@
 * @author   --> Lichangchun
 * @version  --> v2.1
 * @date     --> 2019-07-14
-* @update   --> 2019-07-18
+* @update   --> 2019-07-20
 * @brief    --> 热控模块
 *           1. 读取热控板温度数据并发送给主控板
 *           2. 从主控板接收所有板的温度数据和温度控制指令
@@ -13,6 +13,7 @@
 #include <Wire.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <string.h>
 
 /* Private define ------------------------------------------------------------*/
 #define ONE_WIRE_BUS 42
@@ -47,7 +48,7 @@ volatile float cTemperThermal = 0; // 热控测量温度
 
 volatile float tem = 0; // 热控板测量温度临时存储
 
-uint8_t recvBuffer[20] = {0};   // 数据接收缓冲区
+uint8_t recvBuffer[64] = {0};   // 数据接收缓冲区
 
 uint8_t ledFlag = 0; // LED 状态标志
 uint64_t previousMillis = 0; // 毫秒时间记录
@@ -117,15 +118,13 @@ void loop()
         digitalWrite(EN4, LOW);
     }
 
-    delay(20);
+    delay(50);
 }
 
 // I2C 数据请求回调函数
 void requestEvent()
 {
-    int16_t temp = tem * 10; // ×10 保留 1 位小数
-    Wire.write(temp >> 8);
-    Wire.write(temp & 0xFF);
+    Wire.write((uint8_t *)&tem, 4);
 }
 
 // I2C 数据接收回调函数
@@ -160,17 +159,17 @@ void receiveEvent(int count)
     else if (recvBuffer[0] == 0x01) // 测量温度
     {
         // 拷贝数据到当前温度值变量
-        cTemperMain = ((int16_t)((recvBuffer[1] << 8) + recvBuffer[2])) * 0.1;
-        cTemperAttitude = ((int16_t)((recvBuffer[3] << 8) + recvBuffer[4])) * 0.1;
-        cTemperPower = ((int16_t)((recvBuffer[5] << 8) + recvBuffer[6])) * 0.1;
-        cTemperThermal = ((int16_t)((recvBuffer[7] << 8) + recvBuffer[8])) * 0.1;
+        memcpy(&cTemperMain, &recvBuffer[1], 4);
+        memcpy(&cTemperAttitude, &recvBuffer[5], 4);
+        memcpy(&cTemperPower, &recvBuffer[9], 4);
+        memcpy(&cTemperThermal, &recvBuffer[13], 4);
     }
     else if (recvBuffer[0] == 0x02) // 设置温度
     {
         // 拷贝数据到设置温度值变量
-        dTemperMain = ((int16_t)((recvBuffer[1] << 8) + recvBuffer[2])) * 0.1;
-        dTemperAttitude = ((int16_t)((recvBuffer[3] << 8) + recvBuffer[4])) * 0.1;
-        dTemperPower = ((int16_t)((recvBuffer[5] << 8) + recvBuffer[6])) * 0.1;
-        dTemperThermal = ((int16_t)((recvBuffer[7] << 8) + recvBuffer[8])) * 0.1;
+        memcpy(&cTemperMain, &recvBuffer[1], 4);
+        memcpy(&cTemperAttitude, &recvBuffer[5], 4);
+        memcpy(&cTemperPower, &recvBuffer[9], 4);
+        memcpy(&cTemperThermal, &recvBuffer[13], 4);
     }
 }
