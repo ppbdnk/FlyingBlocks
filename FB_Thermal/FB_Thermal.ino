@@ -3,10 +3,13 @@
 * @author   --> Lichangchun
 * @version  --> v2.1
 * @date     --> 2019-07-14
-* @update   --> 2019-07-20
+* @update   --> 2019-07-21
 * @brief    --> 热控模块
 *           1. 读取热控板温度数据并发送给主控板
 *           2. 从主控板接收所有板的温度数据和温度控制指令
+*           Update: 
+*           1. 所有板子的温度都改由热控板测量
+*           2. 添加串口调试编译开关
 *******************************************************************************/
 
 /* Includes ------------------------------------------------------------------*/
@@ -15,42 +18,54 @@
 #include <DallasTemperature.h>
 #include <string.h>
 
+/* Private macro -------------------------------------------------------------*/
+// 定义串口调试宏开关，用于开发阶段的数据查看，正式编译的时候应当注释掉此行
+#define SERIAL_DEBUG
+
 /* Private define ------------------------------------------------------------*/
-#define ONE_WIRE_BUS 42
 #define I2C_WIRE_BUS 0x12
 
 /* Private variables ---------------------------------------------------------*/
 // 引脚定义
-const int ledpin = 22; // LED
-const int EN1 = 10;  //主控加热
-const int EN2 = 11;  //电源加热
-const int EN3 = 12;  //姿控加热
-const int EN4 = 13;  //热控加热
+const uint8_t ledpin = 13; // LED
+const uint8_t EN1 = 32;  //主控加热
+const uint8_t EN2 = 33;  //姿控加热
+const uint8_t EN3 = 34;  //电源加热
+const uint8_t EN4 = 35;  //热控加热
+const uint8_t DS18B20_1 = 42; // 主控
+const uint8_t DS18B20_2 = 43; // 姿控
+const uint8_t DS18B20_3 = 44; // 电源
+const uint8_t DS18B20_4 = 45; // 热控
 
 // 实例化温度传感器
-OneWire oneWire(ONE_WIRE_BUS);
-DallasTemperature sensors(&oneWire);
+OneWire oneWire1(DS18B20_1);
+DallasTemperature sensors1(&oneWire1);
+OneWire oneWire2(DS18B20_2);
+DallasTemperature sensors2(&oneWire2);
+OneWire oneWire3(DS18B20_3);
+DallasTemperature sensors3(&oneWire3);
+OneWire oneWire4(DS18B20_4);
+DallasTemperature sensors4(&oneWire4);
 
 // 温控开关
-volatile bool thermalOn = false;
+bool thermalOn = false;
 
 // 温度设定值
-volatile float dTemperMain = 38.0;    // 主控设定温度
-volatile float dTemperAttitude = 38.0;// 姿态设定温度
-volatile float dTemperPower = 38.0;   // 电源设定温度
-volatile float dTemperThermal = 38.0; // 热控设定温度
+float dTemperMain = 38.0;    // 主控设定温度
+float dTemperAttitude = 38.0;// 姿态设定温度
+float dTemperPower = 38.0;   // 电源设定温度
+float dTemperThermal = 38.0; // 热控设定温度
 
 // 温度测量值
-volatile float cTemperMain = 0;    // 主控测量温度
-volatile float cTemperAttitude = 0;// 姿态测量温度
-volatile float cTemperPower = 0;   // 电源测量温度
-volatile float cTemperThermal = 0; // 热控测量温度
-
-volatile float tem = 0; // 热控板测量温度临时存储
+float cTemperMain = 0;    // 主控测量温度
+float cTemperAttitude = 0;// 姿态测量温度
+float cTemperPower = 0;   // 电源测量温度
+float cTemperThermal = 0; // 热控测量温度
 
 uint8_t recvBuffer[64] = {0};   // 数据接收缓冲区
 
-uint8_t ledFlag = 0; // LED 状态标志
+uint8_t ledFlag = LOW; // LED 状态标志
+uint8_t ledCnt = 0; // LED 计数
 uint64_t previousMillis = 0; // 毫秒时间记录
 
 /* Private functions ---------------------------------------------------------*/
@@ -62,37 +77,66 @@ void setup()
     pinMode(EN2, OUTPUT);
     pinMode(EN3, OUTPUT);
     pinMode(EN4, OUTPUT);
+#ifdef SERIAL_DEBUG
+    Serial.begin(115200);
+#endif
     // I2C 总线初始化
     Wire.begin(I2C_WIRE_BUS);
     Wire.onRequest(requestEvent);
     Wire.onReceive(receiveEvent);
     // 温度传感器初始化
-    sensors.begin();
-    sensors.setWaitForConversion(false); // 设置为非阻塞模式
-    sensors.requestTemperatures();
+    sensors1.begin();
+    sensors1.setWaitForConversion(false); // 设置为非阻塞模式
+    sensors1.requestTemperatures();
+    sensors2.begin();
+    sensors2.setWaitForConversion(false); // 设置为非阻塞模式
+    sensors2.requestTemperatures();
+    sensors3.begin();
+    sensors3.setWaitForConversion(false); // 设置为非阻塞模式
+    sensors3.requestTemperatures();
+    sensors4.begin();
+    sensors4.setWaitForConversion(false); // 设置为非阻塞模式
+    sensors4.requestTemperatures();
 }
 
 void loop()
 {
     uint64_t currentMillis = millis();
-    // 每 500ms 翻转 LED，并获取一次温度
-    if (currentMillis - previousMillis >= 500)
+    // 每 100ms 获取一次温度，每 500ms 翻转一次 LED
+    if (currentMillis - previousMillis >= 100)
     {
-        previousMillis = currentMillis; // 更新时间记录
-        tem = sensors.getTempCByIndex(0);
+        // 更新时间记录
+        previousMillis = currentMillis; 
+        // 更新温度读数
+        cTemperMain = sensors1.getTempCByIndex(0);
+        cTemperAttitude = sensors2.getTempCByIndex(0);
+        cTemperPower = sensors3.getTempCByIndex(0);
+        cTemperThermal = sensors4.getTempCByIndex(0);
+        // 闪灯
+        if (ledCnt == 5)
+        {
+            ledCnt = 0;
+            ledFlag = !ledFlag;
+            digitalWrite(ledpin, ledFlag);
+        #ifdef SERIAL_DEBUG
+            // 打印以供查看
+            Serial.print("当前温度: ");
+            Serial.print(cTemperMain);
+            Serial.print(", ");
+            Serial.print(cTemperAttitude);
+            Serial.print(", ");
+            Serial.print(cTemperPower);
+            Serial.print(", ");
+            Serial.println(cTemperThermal);
+        #endif
+        }
+        ledCnt++;
 
-        if (ledFlag == 0)
-        {
-            ledFlag = 1;
-            digitalWrite(ledpin, LOW);
-        }
-        else 
-        {
-            ledFlag = 0;
-            digitalWrite(ledpin, HIGH);
-        }
-        
-        sensors.requestTemperatures(); // 发起新的温度转换
+        // 发起新一轮的温度转换
+        sensors1.requestTemperatures(); 
+        sensors2.requestTemperatures(); 
+        sensors3.requestTemperatures(); 
+        sensors4.requestTemperatures(); 
     }
 
     // Note：此处为简单的温度控制算法，用户可自行更换更高级、更合理的算法
@@ -118,22 +162,23 @@ void loop()
         digitalWrite(EN4, LOW);
     }
 
-    delay(50);
+    delay(20);
 }
 
 // I2C 数据请求回调函数
 void requestEvent()
 {
-    Wire.write((uint8_t *)&tem, 4);
+    Wire.write((uint8_t *)&cTemperMain, 4);
+    Wire.write((uint8_t *)&cTemperAttitude, 4);
+    Wire.write((uint8_t *)&cTemperPower, 4);
+    Wire.write((uint8_t *)&cTemperThermal, 4);
 }
 
 // I2C 数据接收回调函数
 /**
  * recvBuffer[0]:
- *      0x00 关闭热控
- *      0x01 打开热控
- *      0x02 测量温度
- *      0x03 设置温度
+ *      0x00 热控开关
+ *      0x01 设置温度
  **/
 void receiveEvent(int count)
 {
@@ -149,27 +194,34 @@ void receiveEvent(int count)
         if (recvBuffer[1] == 0x00)   // 温控开关
         {
             thermalOn = false;
+        #ifdef SERIAL_DEBUG
+            Serial.println("关闭热控");
+        #endif
         }
         else // (recvBuffer[1] == 0x01) 打开温控
         {
             thermalOn = true;
+        #ifdef SERIAL_DEBUG
+            Serial.println("打开热控");
+        #endif
         }
     }
-
-    else if (recvBuffer[0] == 0x01) // 测量温度
-    {
-        // 拷贝数据到当前温度值变量
-        memcpy(&cTemperMain, &recvBuffer[1], 4);
-        memcpy(&cTemperAttitude, &recvBuffer[5], 4);
-        memcpy(&cTemperPower, &recvBuffer[9], 4);
-        memcpy(&cTemperThermal, &recvBuffer[13], 4);
-    }
-    else if (recvBuffer[0] == 0x02) // 设置温度
+    else if (recvBuffer[0] == 0x01) // 设置温度
     {
         // 拷贝数据到设置温度值变量
-        memcpy(&cTemperMain, &recvBuffer[1], 4);
-        memcpy(&cTemperAttitude, &recvBuffer[5], 4);
-        memcpy(&cTemperPower, &recvBuffer[9], 4);
-        memcpy(&cTemperThermal, &recvBuffer[13], 4);
+        memcpy(&dTemperMain, &recvBuffer[1], 4);
+        memcpy(&dTemperAttitude, &recvBuffer[5], 4);
+        memcpy(&dTemperPower, &recvBuffer[9], 4);
+        memcpy(&dTemperThermal, &recvBuffer[13], 4);
+    #ifdef SERIAL_DEBUG
+        Serial.print("设置温度: ");
+        Serial.print(dTemperMain);
+        Serial.print(", ");
+        Serial.print(dTemperAttitude);
+        Serial.print(", ");
+        Serial.print(dTemperPower);
+        Serial.print(", ");
+        Serial.println(dTemperThermal);
+    #endif
     }
 }
