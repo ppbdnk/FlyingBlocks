@@ -3,7 +3,7 @@
 * @author   --> Lichangchun
 * @version  --> v2.1
 * @date     --> 2019-07-11
-* @update   --> 2019-07-21
+* @update   --> 2019-07-22
 * @brief    --> 主控模块
 *           1. 通过串口接收上位机发送的指令，并通过 I2C 总线转发给各个子系统模块
 *           2. 从各个子系统模块收集数据，分别通过串口数据报发送给上位机
@@ -12,6 +12,7 @@
 *           update:
 *           1. 主控板不设置控制状态的记录，直接从各个板子获取
 *           2. 所有温度数据从热控板获取
+*           3. 四元数改为欧拉角（yaw-pitch-roll）
 *******************************************************************************/
   
 /* Includes ------------------------------------------------------------------*/
@@ -79,7 +80,7 @@ volatile float cTemperPower = 0;   // 电源测量温度
 volatile float cTemperThermal = 0; // 热控测量温度
 
 // IMU 数据
-float quaternion[4] = {0};
+float eulers[3] = {0};
 float angularVelocities[3] = {0};
 float accelerations[3] = {0};
 
@@ -348,31 +349,31 @@ void loop()
     // 主控板
     // todo.
 
-    // 姿控板： 四元数(16) + 三轴角速度(12) + 三轴加速度(12) + 
+    // 姿控板： 欧拉角(12) + 三轴角速度(12) + 三轴加速度(12) + 
        //      飞轮转速(2) + 飞轮控制状态(1) 三轴磁矩(6) + 磁棒控制状态(1)
     i = 0;
-    // 将 I2C 数据读到接收缓冲区，共 50 字节
-    Wire.requestFrom(I2C_ADDR_ATTITUDE, 50);
+    // 将 I2C 数据读到接收缓冲区，共 46 字节
+    Wire.requestFrom(I2C_ADDR_ATTITUDE, 46);
     while (Wire.available())
     {
         iicBuffer[i++] = Wire.read();
     }
-    // 更新四元数数据
-    memcpy(quaternion, &iicBuffer[0], sizeof quaternion);
+    // 更新欧拉角数据
+    memcpy(eulers, &iicBuffer[0], sizeof eulers);
     // 更新三轴角速度数据
-    memcpy(angularVelocities, &iicBuffer[16], sizeof angularVelocities);
+    memcpy(angularVelocities, &iicBuffer[12], sizeof angularVelocities);
     // 更新三轴加速度数据
-    memcpy(accelerations, &iicBuffer[28], sizeof accelerations);
+    memcpy(accelerations, &iicBuffer[24], sizeof accelerations);
     // 更新飞轮转速测量值
-    memcpy(&cWheelSpeed, &iicBuffer[40], sizeof(int16_t));
+    memcpy(&cWheelSpeed, &iicBuffer[36], sizeof(int16_t));
     // 飞轮控制状态
-    wheelControlOn = (bool)iicBuffer[42];
+    wheelControlOn = (bool)iicBuffer[38];
     // 更新三轴磁力矩器电流
-    memcpy(&cMagneticMomentX, &iicBuffer[43], sizeof(int16_t));
-    memcpy(&cMagneticMomentY, &iicBuffer[45], sizeof(int16_t));
-    memcpy(&cMagneticMomentZ, &iicBuffer[47], sizeof(int16_t));
+    memcpy(&cMagneticMomentX, &iicBuffer[39], sizeof(int16_t));
+    memcpy(&cMagneticMomentY, &iicBuffer[41], sizeof(int16_t));
+    memcpy(&cMagneticMomentZ, &iicBuffer[43], sizeof(int16_t));
     // 磁力矩器开关状态
-    magnetbarsControlOn = (bool)iicBuffer[49];
+    magnetbarsControlOn = (bool)iicBuffer[45];
 
     // 电源板：电量(1) + 电源控制状态(1)
     i = 0;
@@ -451,13 +452,13 @@ void loop()
     sendBuffer[1] = 0x55;
     sendBuffer[2] = 0x04; // IMU 数据
     sendBuffer[3] = 40;
-    memcpy(&sendBuffer[4], quaternion, sizeof quaternion);
-    memcpy(&sendBuffer[20], angularVelocities, sizeof angularVelocities);
-    memcpy(&sendBuffer[32], accelerations, sizeof accelerations);
-    sendBuffer[44] = 0; // 校验和，todo.
-    sendBuffer[45] = 0x0A;
-    sendBuffer[46] = 0x0D;
-    Serial1.write(sendBuffer, 47);
+    memcpy(&sendBuffer[4], eulers, sizeof eulers);
+    memcpy(&sendBuffer[16], angularVelocities, sizeof angularVelocities);
+    memcpy(&sendBuffer[28], accelerations, sizeof accelerations);
+    sendBuffer[40] = 0; // 校验和，todo.
+    sendBuffer[41] = 0x0A;
+    sendBuffer[42] = 0x0D;
+    Serial1.write(sendBuffer, 43);
     sleep(25);
 
     ////// 发送飞轮数据到上位机 //////
