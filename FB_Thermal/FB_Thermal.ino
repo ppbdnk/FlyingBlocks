@@ -62,6 +62,9 @@ float cTemperAttitude = 0;// 姿态测量温度
 float cTemperPower = 0;   // 电源测量温度
 float cTemperThermal = 0; // 热控测量温度
 
+double kp, ki, kd; // PID Parameter 
+double kLp;        // LowPass Parameter
+
 uint8_t recvBuffer[64] = {0};   // 数据接收缓冲区
 
 uint8_t ledFlag = LOW; // LED 状态标志
@@ -97,6 +100,14 @@ void setup()
     sensors4.begin();
     sensors4.setWaitForConversion(false); // 设置为非阻塞模式
     sensors4.requestTemperatures();
+
+    // PID Parameter
+    // kp = 2.8;
+    // ki = 0;
+    // kd = 8;
+
+    // LowPass Parameter
+    // kLp = 0.9;
 }
 
 void loop()
@@ -225,3 +236,33 @@ void receiveEvent(int count)
     #endif
     }
 }
+
+//PID_Controller
+double Compute(double Ip)
+{
+   /*How long since we last calculated*/
+   double now = double(millis())/1000;
+   //Serial.println(now);
+   double timeChange = (double)(now - lastTime);
+  
+   /*Compute all the working error variables*/
+   double error = Setpoint - Ip;
+   errSum += (error * timeChange);
+   double dErr = (error - lastErr) / timeChange;
+  
+   /*Compute PID Output*/
+   double Op = kp * error + ki * errSum + kd * dErr;
+  
+   /*Remember some variables for next time*/
+   lastErr = error;
+   lastTime = now;
+   
+   return Op;
+}
+
+//LowPass_Filter
+double Lp_Filter(double old_value, double value)
+{ 
+   double out_value = kLp*old_value + (1-kLp)*value;
+   return out_value;
+  }

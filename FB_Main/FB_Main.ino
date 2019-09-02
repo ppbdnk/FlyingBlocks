@@ -150,26 +150,19 @@ void RecvThread::loop()
         ////// 电源控制开关 ////// 
         if (recvBuffer[2] == 0x01)
         {
-            if (recvBuffer[4] == 0x00)
-            {
-                Wire.beginTransmission(I2C_ADDR_POWER);
-                Wire.write(0x00);
-                Wire.write(0x00);
-                Wire.endTransmission();
-            #ifdef SERIAL_DEBUG
-                Serial.println("关闭电控");
-            #endif
-            }
-            else
-            {
-                Wire.beginTransmission(I2C_ADDR_POWER);
-                Wire.write(0x00);
-                Wire.write(0x01);
-                Wire.endTransmission();
-            #ifdef SERIAL_DEBUG
-                Serial.println("打开电控");
-            #endif
-            }
+            Wire.beginTransmission(I2C_ADDR_POWER);
+            Wire.write(recvBuffer[4]);
+            Wire.write(recvBuffer[5]);
+            Wire.write(recvBuffer[6]);
+            Wire.write(recvBuffer[7]);
+            Wire.write(recvBuffer[8]);
+            Wire.write(recvBuffer[9]);
+            Wire.write(recvBuffer[10]);
+            wire.write(recvBuffer[11]);
+            Wire.endTransmission();
+        #ifdef SERIAL_DEBUG
+            Serial.println("关闭电控");
+        #endif
         }
 
         ////// 飞轮控制开关 ////// 
