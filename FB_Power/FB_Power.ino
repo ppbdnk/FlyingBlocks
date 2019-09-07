@@ -31,14 +31,16 @@ int SW6 = A1;  // SWITCH 6
 int SW7 = A0;  // SWITCH 7
 
 // 电压相关
-int Volt; 
+int volt; 
 unsigned char v0;
 int t;
 
 int x = 0; // 判断是否收到主控板指令
 
-OneWire oneWire(ONE_WIRE_BUS);
-DallasTemperature sensors(&oneWire);
+uint8_t recvBuffer[64] = {0};   // 数据接收缓冲区
+
+//OneWire oneWire(ONE_WIRE_BUS);
+//DallasTemperature sensors(&oneWire);
 
 void setup() 
 {
